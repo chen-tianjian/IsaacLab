@@ -72,6 +72,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:FrankaCubeLiftEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc.json",
+        "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy.json",
     },
     disable_env_checker=True,
 )

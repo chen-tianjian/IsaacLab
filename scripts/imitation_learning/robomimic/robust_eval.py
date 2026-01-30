@@ -80,11 +80,13 @@ import copy
 import os
 import pathlib
 import random
+from collections import deque
 
 import gymnasium as gym
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.torch_utils as TorchUtils
 import torch
+from policy_utils import get_observation_horizon, is_action_chunking_policy, stack_observations
 
 from isaaclab_tasks.utils import parse_env_cfg
 
@@ -107,28 +109,48 @@ def rollout(policy, env: gym.Env, success_term, horizon: int, device: torch.devi
     obs_dict, _ = env.reset()
     traj = dict(actions=[], obs=[], next_obs=[])
 
+    # Check if this is a diffusion policy and set up observation queue for frame stacking
+    use_frame_stacking = is_action_chunking_policy(policy)
+    if use_frame_stacking:
+        obs_horizon = get_observation_horizon(policy)
+        obs_queue = deque(maxlen=obs_horizon)
+    else:
+        obs_queue = None
+
     for _ in range(horizon):
-        # Prepare policy observations
-        obs = copy.deepcopy(obs_dict["policy"])
-        for ob in obs:
-            obs[ob] = torch.squeeze(obs[ob])
+        # Prepare observations - convert to numpy arrays for robomimic v0.5.0
+        obs = {}
+        for ob in obs_dict["policy"]:
+            obs[ob] = obs_dict["policy"][ob].squeeze(0).cpu().numpy()
 
         # Check if environment image observations
         if hasattr(env.cfg, "image_obs_list"):
             # Process image observations for robomimic inference
             for image_name in env.cfg.image_obs_list:
                 if image_name in obs_dict["policy"].keys():
-                    # Convert from chw uint8 to hwc normalized float
-                    image = torch.squeeze(obs_dict["policy"][image_name])
-                    image = image.permute(2, 0, 1).clone().float()
+                    # Isaac Lab cameras return HWC format (H, W, C) which robomimic expects
+                    # Just normalize uint8 [0, 255] to float [0, 1]
+                    image = obs_dict["policy"][image_name].squeeze(0).clone().float()
                     image = image / 255.0
                     image = image.clip(0.0, 1.0)
-                    obs[image_name] = image
+                    obs[image_name] = image.cpu().numpy()
 
         traj["obs"].append(obs)
 
+        # For diffusion policy, stack observations along time dimension
+        if use_frame_stacking:
+            # If queue is not full, repeat the first observation to fill it
+            if len(obs_queue) == 0:
+                for _ in range(obs_horizon):
+                    obs_queue.append(copy.deepcopy(obs))
+            else:
+                obs_queue.append(copy.deepcopy(obs))
+            policy_input = stack_observations(obs_queue, obs.keys())
+        else:
+            policy_input = obs
+
         # Compute actions
-        actions = policy(obs)
+        actions = policy(policy_input)
 
         # Unnormalize actions if normalization factors are provided
         if args_cli.norm_factor_min is not None and args_cli.norm_factor_max is not None:
@@ -235,9 +257,6 @@ def main() -> None:
     success_term = env_cfg.terminations.success
     env_cfg.terminations.success = None
 
-    # Set evaluation settings
-    env_cfg.eval_mode = True
-
     # Create environment
     env = gym.make(args_cli.task, cfg=env_cfg).unwrapped
 
@@ -271,7 +290,9 @@ def main() -> None:
         with open(output_path, "w") as file:
             # Evaluate each setting
             for setting in settings:
-                env.cfg.eval_type = setting
+                # Set evaluation type if the environment supports it
+                if hasattr(env.cfg, "eval_type"):
+                    env.cfg.eval_type = setting
 
                 file.write(f"Evaluation setting: {setting}\n")
                 file.write("=" * 80 + "\n\n")

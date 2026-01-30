@@ -83,6 +83,116 @@ import isaaclab_tasks.manager_based.locomanipulation.pick_place  # noqa: F401
 import isaaclab_tasks.manager_based.manipulation.pick_place  # noqa: F401
 
 
+def get_env_metadata_from_dataset_isaaclab(dataset_path: str, set_env_specific_obs_processors: bool = True) -> dict:
+    """Get environment metadata from dataset, handling Isaac Lab format.
+
+    Isaac Lab datasets may use 'sim_args' instead of 'env_kwargs'. This function
+    handles both formats for compatibility with robomimic v0.5.0.
+
+    Args:
+        dataset_path: Path to the HDF5 dataset.
+        set_env_specific_obs_processors: Whether to set environment-specific observation processors.
+
+    Returns:
+        Environment metadata dictionary with 'env_kwargs' key (even if empty).
+    """
+    dataset_path = os.path.expanduser(dataset_path)
+    with h5py.File(dataset_path, "r") as f:
+        env_args_raw = f["data"].attrs["env_args"]
+        # Handle bytes encoding for robustness
+        if isinstance(env_args_raw, bytes):
+            env_args = env_args_raw.decode("utf-8")
+        else:
+            env_args = str(env_args_raw)
+        env_meta = json.loads(env_args)
+
+    # Ensure env_kwargs exists for robomimic v0.5.0 compatibility
+    env_kwargs = env_meta.setdefault("env_kwargs", {})
+
+    # Remove env_lang if present (robomimic v0.5.0 does this)
+    env_kwargs.pop("env_lang", None)
+
+    if set_env_specific_obs_processors:
+        EnvUtils.set_env_specific_obs_processing(env_meta=env_meta)
+
+    return env_meta
+
+
+def ensure_dataset_cfg_list(dataset_cfg):
+    """Return dataset config as a validated single-item list.
+
+    Handles multiple input formats (string, dict, list) for flexibility and provides
+    clear error messages for invalid configurations.
+
+    Args:
+        dataset_cfg: Dataset configuration in various formats.
+
+    Returns:
+        List of dataset config dicts with validated "path" keys.
+
+    Raises:
+        TypeError: If dataset_cfg is not a supported type.
+        ValueError: If dataset_cfg list is empty.
+        NotImplementedError: If multiple datasets are provided.
+        KeyError: If dataset config is missing "path" key.
+    """
+    if isinstance(dataset_cfg, str):
+        dataset_cfg_list = [{"path": dataset_cfg}]
+    elif isinstance(dataset_cfg, dict):
+        dataset_cfg_list = [dataset_cfg]
+    elif isinstance(dataset_cfg, list):
+        dataset_cfg_list = dataset_cfg
+    else:
+        raise TypeError(f"Unsupported config.train.data type: {type(dataset_cfg)}")
+
+    if len(dataset_cfg_list) == 0:
+        raise ValueError("config.train.data list is empty.")
+    if len(dataset_cfg_list) > 1:
+        raise NotImplementedError("Multiple datasets are not currently supported in this training script.")
+    if "path" not in dataset_cfg_list[0]:
+        raise KeyError("Dataset config is missing required 'path' key.")
+    return dataset_cfg_list
+
+
+def parse_exp_dirs(exp_dirs):
+    """Parse experiment directories from TrainUtils.get_exp_dir() return value.
+
+    Robomimic 0.5 started returning more than three values (and sometimes a dict)
+    from get_exp_dir. This function supports the legacy tuple return, the extended
+    tuple, dict, and object-with-attributes forms.
+
+    Args:
+        exp_dirs: Return value from TrainUtils.get_exp_dir().
+
+    Returns:
+        Tuple of (log_dir, ckpt_dir, video_dir).
+
+    Raises:
+        ValueError: If tuple/list has fewer than 3 elements.
+        TypeError: If directories cannot be extracted from the return type.
+    """
+    log_dir = ckpt_dir = video_dir = None
+
+    if isinstance(exp_dirs, (tuple, list)):
+        if len(exp_dirs) < 3:
+            raise ValueError("TrainUtils.get_exp_dir returned fewer than three directories.")
+        log_dir, ckpt_dir, video_dir = exp_dirs[:3]
+    elif isinstance(exp_dirs, dict):
+        log_dir = exp_dirs.get("log") or exp_dirs.get("log_dir")
+        ckpt_dir = exp_dirs.get("ckpt") or exp_dirs.get("ckpt_dir")
+        video_dir = exp_dirs.get("video") or exp_dirs.get("video_dir")
+    else:
+        # Try object-with-attributes form
+        log_dir = getattr(exp_dirs, "log", None) or getattr(exp_dirs, "log_dir", None)
+        ckpt_dir = getattr(exp_dirs, "ckpt", None) or getattr(exp_dirs, "ckpt_dir", None)
+        video_dir = getattr(exp_dirs, "video", None) or getattr(exp_dirs, "video_dir", None)
+
+    if log_dir is None or ckpt_dir is None or video_dir is None:
+        raise TypeError(f"Unexpected TrainUtils.get_exp_dir return type: {type(exp_dirs)}")
+
+    return log_dir, ckpt_dir, video_dir
+
+
 def normalize_hdf5_actions(config: Config, log_dir: str) -> str:
     """Normalizes actions in hdf5 dataset to [-1, 1] range.
 
@@ -160,16 +270,22 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
     # read config to set up metadata for observation modalities (e.g. detecting rgb observations)
     ObsUtils.initialize_obs_utils_with_config(config)
 
+    # Validate and normalize dataset config format
+    dataset_cfg_list = ensure_dataset_cfg_list(config.train.data)
+    dataset_cfg = dataset_cfg_list[0]
+
     # make sure the dataset exists
-    dataset_path = os.path.expanduser(config.train.data)
+    dataset_path = os.path.expanduser(str(dataset_cfg["path"]))
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Dataset at provided path {dataset_path} not found!")
 
     # load basic metadata from training file
     print("\n============= Loaded Environment Metadata =============")
-    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=config.train.data)
+    env_meta = get_env_metadata_from_dataset_isaaclab(dataset_path=dataset_path)
+    # robomimic v0.5.0 changed the function signature
+    action_keys = getattr(config.train, "action_keys", ["actions"])
     shape_meta = FileUtils.get_shape_metadata_from_dataset(
-        dataset_path=config.train.data, all_obs_keys=config.all_obs_keys, verbose=True
+        dataset_config=dataset_cfg, action_keys=action_keys, all_obs_keys=config.all_obs_keys, verbose=True
     )
 
     if config.experiment.env is not None:
@@ -199,6 +315,29 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
 
     print("")
 
+    # robomimic v0.5.0 expects config.train.data to be a list of dicts with "path" keys
+    # Convert string path to list format if needed
+    with config.values_unlocked():
+        if isinstance(config.train.data, str):
+            config.train.data = [{"path": config.train.data}]
+
+    # load training data (must be done before algo_factory in robomimic v0.5.0)
+    trainset, validset = TrainUtils.load_data_for_training(config, obs_keys=shape_meta["all_obs_keys"])
+    train_sampler = trainset.get_dataset_sampler()
+    print("\n============= Training Dataset =============")
+    print(trainset)
+    print("")
+
+    # robomimic v0.5.0 requires num_train_batches and num_epochs in optim_params for LR scheduler
+    train_num_steps = config.experiment.epoch_every_n_steps
+    with config.values_unlocked():
+        if "optim_params" in config.algo:
+            for k in config.algo.optim_params:
+                config.algo.optim_params[k]["num_train_batches"] = (
+                    len(trainset) if train_num_steps is None else train_num_steps
+                )
+                config.algo.optim_params[k]["num_epochs"] = config.train.num_epochs
+
     # setup for a new training run
     data_logger = DataLogger(log_dir, config=config, log_tb=config.experiment.logging.log_tb)
     model = algo_factory(
@@ -215,13 +354,6 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
 
     print("\n============= Model Summary =============")
     print(model)  # print model summary
-    print("")
-
-    # load training data
-    trainset, validset = TrainUtils.load_data_for_training(config, obs_keys=shape_meta["all_obs_keys"])
-    train_sampler = trainset.get_dataset_sampler()
-    print("\n============= Training Dataset =============")
-    print(trainset)
     print("")
 
     # maybe retrieve statistics for normalizing observations
@@ -397,7 +529,14 @@ def main(args: argparse.Namespace):
     # change location of experiment directory
     config.train.output_dir = os.path.abspath(os.path.join("./logs", args.log_dir, args.task))
 
-    log_dir, ckpt_dir, video_dir = TrainUtils.get_exp_dir(config)
+    # Convert dataset config to list format expected by robomimic v0.5.0
+    dataset_cfg_list = ensure_dataset_cfg_list(config.train.data)
+    with config.values_unlocked():
+        config.train.data = dataset_cfg_list
+
+    # Get experiment directories with robust parsing for different robomimic versions
+    exp_dirs = TrainUtils.get_exp_dir(config)
+    log_dir, ckpt_dir, video_dir = parse_exp_dirs(exp_dirs)
 
     if args.normalize_training_actions:
         config.train.data = normalize_hdf5_actions(config, log_dir)

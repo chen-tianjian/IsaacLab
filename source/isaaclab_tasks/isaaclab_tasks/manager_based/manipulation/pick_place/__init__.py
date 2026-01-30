@@ -13,6 +13,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.pickplace_gr1t2_env_cfg:PickPlaceGR1T2EnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
+        "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
     },
     disable_env_checker=True,
 )
@@ -43,6 +44,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.pickplace_gr1t2_waist_enabled_env_cfg:PickPlaceGR1T2WaistEnabledEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
+        "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
     },
     disable_env_checker=True,
 )
@@ -53,6 +55,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.pickplace_unitree_g1_inspire_hand_env_cfg:PickPlaceG1InspireFTPEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
+        "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
     },
     disable_env_checker=True,
 )

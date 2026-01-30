@@ -62,6 +62,7 @@ simulation_app = app_launcher.app
 
 import copy
 import random
+from collections import deque
 
 import gymnasium as gym
 import numpy as np
@@ -72,6 +73,8 @@ import torch
 if args_cli.enable_pinocchio:
     import isaaclab_tasks.manager_based.locomanipulation.pick_place  # noqa: F401
     import isaaclab_tasks.manager_based.manipulation.pick_place  # noqa: F401
+
+from policy_utils import get_observation_horizon, is_action_chunking_policy, stack_observations
 
 from isaaclab_tasks.utils import parse_env_cfg
 
@@ -93,28 +96,53 @@ def rollout(policy, env, success_term, horizon, device):
     obs_dict, _ = env.reset()
     traj = dict(actions=[], obs=[], next_obs=[])
 
+    # Check if this is a diffusion policy and set up observation queue for frame stacking
+    use_frame_stacking = is_action_chunking_policy(policy)
+    if use_frame_stacking:
+        obs_horizon = get_observation_horizon(policy)
+        obs_queue = deque(maxlen=obs_horizon)
+        print(f"[INFO] Using diffusion policy with observation_horizon={obs_horizon}")
+    else:
+        obs_queue = None
+
     for i in range(horizon):
-        # Prepare observations
-        obs = copy.deepcopy(obs_dict["policy"])
-        for ob in obs:
-            obs[ob] = torch.squeeze(obs[ob])
+        # Prepare observations - convert to numpy arrays for robomimic v0.5.0
+        # robomimic expects numpy arrays without batch dimension
+        obs = {}
+        for ob in obs_dict["policy"]:
+            # Convert tensor to numpy, squeeze batch dimension (dim 0)
+            obs[ob] = obs_dict["policy"][ob].squeeze(0).cpu().numpy()
 
         # Check if environment image observations
         if hasattr(env.cfg, "image_obs_list"):
             # Process image observations for robomimic inference
             for image_name in env.cfg.image_obs_list:
                 if image_name in obs_dict["policy"].keys():
-                    # Convert from chw uint8 to hwc normalized float
-                    image = torch.squeeze(obs_dict["policy"][image_name])
-                    image = image.permute(2, 0, 1).clone().float()
+                    # Isaac Lab cameras return HWC format (H, W, C) which robomimic expects
+                    # Just normalize uint8 [0, 255] to float [0, 1]
+                    image = obs_dict["policy"][image_name].squeeze(0).clone().float()
                     image = image / 255.0
                     image = image.clip(0.0, 1.0)
-                    obs[image_name] = image
+                    obs[image_name] = image.cpu().numpy()
 
         traj["obs"].append(obs)
 
+        # For diffusion policy, stack observations along time dimension
+        if use_frame_stacking:
+            # If queue is not full, repeat the first observation to fill it
+            if len(obs_queue) == 0:
+                for _ in range(obs_horizon):
+                    obs_queue.append(copy.deepcopy(obs))
+            else:
+                obs_queue.append(copy.deepcopy(obs))
+
+            # Stack observations for diffusion policy [T, ...]
+            policy_input = stack_observations(obs_queue, obs.keys())
+        else:
+            policy_input = obs
+
         # Compute actions
-        actions = policy(obs)
+        actions = policy(policy_input)
 
         # Unnormalize actions
         if args_cli.norm_factor_min is not None and args_cli.norm_factor_max is not None:
