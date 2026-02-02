@@ -56,6 +56,7 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.stack_ik_rel_visuomotor_env_cfg:FrankaCubeStackVisuomotorEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_image_200.json",
+        "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_image.json",
     },
     disable_env_checker=True,
 )
