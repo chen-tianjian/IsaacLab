@@ -46,6 +46,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.stack_ik_rel_env_cfg:FrankaCubeStackEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
         "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
+        "robomimic_act_cfg_entry_point": f"{agents.__name__}:robomimic/act_low_dim.json",
     },
     disable_env_checker=True,
 )
@@ -57,6 +58,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.stack_ik_rel_visuomotor_env_cfg:FrankaCubeStackVisuomotorEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_image_200.json",
         "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_image.json",
+        "robomimic_act_cfg_entry_point": f"{agents.__name__}:robomimic/act_image.json",
     },
     disable_env_checker=True,
 )
@@ -80,6 +82,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.stack_ik_abs_env_cfg:FrankaCubeStackEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
         "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
+        "robomimic_act_cfg_entry_point": f"{agents.__name__}:robomimic/act_low_dim.json",
     },
     disable_env_checker=True,
 )
@@ -111,6 +114,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.stack_ik_rel_env_cfg_skillgen:FrankaCubeStackSkillgenEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
         "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
+        "robomimic_act_cfg_entry_point": f"{agents.__name__}:robomimic/act_low_dim.json",
     },
     disable_env_checker=True,
 )
@@ -122,6 +126,7 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.bin_stack_ik_rel_env_cfg:FrankaBinStackEnvCfg",
         "robomimic_bc_cfg_entry_point": f"{agents.__name__}:robomimic/bc_rnn_low_dim.json",
         "robomimic_diffusion_policy_cfg_entry_point": f"{agents.__name__}:robomimic/diffusion_policy_low_dim.json",
+        "robomimic_act_cfg_entry_point": f"{agents.__name__}:robomimic/act_low_dim.json",
     },
     disable_env_checker=True,
 )
