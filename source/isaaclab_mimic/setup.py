@@ -29,7 +29,7 @@ EXTRAS_REQUIRE = {"robomimic": []}
 
 # Check if the platform is Linux and add the dependency
 if platform.system() == "Linux":
-    EXTRAS_REQUIRE["robomimic"].append("robomimic@git+https://github.com/ARISE-Initiative/robomimic.git@v0.5.0")
+    EXTRAS_REQUIRE["robomimic"].append("robomimic@git+ssh://git@github.com/chen-tianjian/robomimic.git@act")
 
 # Cumulation of all extra-requires
 EXTRAS_REQUIRE["all"] = list(itertools.chain.from_iterable(EXTRAS_REQUIRE.values()))
