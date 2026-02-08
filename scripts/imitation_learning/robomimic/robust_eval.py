@@ -28,6 +28,15 @@ Args:
 
 import argparse
 
+from clearml_utils import (
+    add_clearml_args,
+    connect_configuration_file,
+    init_clearml_task,
+    maybe_execute_remotely,
+    report_evaluation_results,
+    resolve_input_dir,
+)
+
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
@@ -59,10 +68,20 @@ parser.add_argument(
 )
 parser.add_argument("--enable_pinocchio", default=False, action="store_true", help="Enable Pinocchio.")
 
+add_clearml_args(parser)
+
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli = parser.parse_args()
+
+# --- ClearML init (before AppLauncher) ---
+clearml_task = init_clearml_task(args_cli, task_type="testing", default_task_name=f"robust_eval_{args_cli.task}")
+maybe_execute_remotely(clearml_task, args_cli)
+
+# --- Resolve ClearML input_dir URI (before AppLauncher, no sim needed) ---
+if args_cli.input_dir is not None:
+    args_cli.input_dir = resolve_input_dir(args_cli.input_dir)
 
 if args_cli.enable_pinocchio:
     # Import pinocchio before AppLauncher to force the use of the version installed
@@ -345,6 +364,10 @@ def main() -> None:
                     f"\nBest model for setting {setting} is {max_key} with success rate"
                     f" {results_summary[setting][max_key]}\n"
                 )
+
+        # Report evaluation results to ClearML
+        report_evaluation_results(clearml_task, results_summary, seed)
+        connect_configuration_file(clearml_task, output_path, f"eval_results_seed_{seed}")
 
         env.close()
 
