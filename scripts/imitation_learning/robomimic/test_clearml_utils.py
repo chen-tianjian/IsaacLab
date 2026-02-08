@@ -365,9 +365,7 @@ class TestConnectConfiguration(unittest.TestCase):
         mock_task = MagicMock()
         connect_configuration_file(mock_task, "/path/to/config.json", "robomimic_config_file")
 
-        mock_task.connect_configuration.assert_called_once_with(
-            "/path/to/config.json", name="robomimic_config_file"
-        )
+        mock_task.connect_configuration.assert_called_once_with("/path/to/config.json", name="robomimic_config_file")
 
     def test_connect_dict_noop_when_task_none(self):
         from clearml_utils import connect_configuration_dict

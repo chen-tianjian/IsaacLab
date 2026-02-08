@@ -45,7 +45,65 @@ This file has been modified from the original robomimic version to integrate wit
 
 """Launch Isaac Sim Simulator first."""
 
+import argparse
+
+from clearml_utils import (
+    add_clearml_args,
+    connect_configuration_file,
+    init_clearml_task,
+    maybe_execute_remotely,
+    resolve_dataset,
+    upload_checkpoint,
+    upload_videos_from_dir,
+)
+
 from isaaclab.app import AppLauncher
+
+# --- Argparse (BEFORE AppLauncher for ClearML remote execution support) ---
+parser = argparse.ArgumentParser()
+
+# Experiment Name (for tensorboard, saving models, etc.)
+parser.add_argument(
+    "--name",
+    type=str,
+    default=None,
+    help="(optional) if provided, override the experiment name defined in the config",
+)
+
+# Dataset path, to override the one in the config
+parser.add_argument(
+    "--dataset",
+    type=str,
+    default=None,
+    help="(optional) if provided, override the dataset path defined in the config",
+)
+
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--algo", type=str, default=None, help="Name of the algorithm.")
+parser.add_argument("--log_dir", type=str, default="robomimic", help="Path to log directory")
+parser.add_argument("--normalize_training_actions", action="store_true", default=False, help="Normalize actions")
+parser.add_argument(
+    "--epochs",
+    type=int,
+    default=None,
+    help=(
+        "Optional: Number of training epochs. If specified, overrides the number of epochs from the JSON training"
+        " config."
+    ),
+)
+
+add_clearml_args(parser)
+args_cli = parser.parse_args()
+
+# --- ClearML init (before AppLauncher) ---
+clearml_task = init_clearml_task(
+    args_cli, task_type="training", default_task_name=f"train_{args_cli.algo}_{args_cli.task}"
+)
+maybe_execute_remotely(clearml_task, args_cli)
+
+# --- Resolve ClearML dataset URI (before AppLauncher, no sim needed) ---
+if args_cli.dataset is not None:
+    args_cli.dataset = resolve_dataset(args_cli.dataset)
 
 # launch omniverse app
 app_launcher = AppLauncher(headless=True)
@@ -53,7 +111,6 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import argparse
 import importlib
 import json
 import os
@@ -239,7 +296,7 @@ def normalize_hdf5_actions(config: Config, log_dir: str) -> str:
     return normalized_path
 
 
-def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: str):
+def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: str, clearml_task=None):
     """Train a model using the algorithm specified in config.
 
     Args:
@@ -248,6 +305,7 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
         log_dir: Directory to save logs.
         ckpt_dir: Directory to save checkpoints.
         video_dir: Directory to save videos.
+        clearml_task: ClearML Task instance (or None if ClearML is disabled/unavailable).
     """
     # first set seeds
     np.random.seed(config.train.seed)
@@ -349,8 +407,10 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
     )
 
     # save the config as a json file
-    with open(os.path.join(log_dir, "..", "config.json"), "w") as outfile:
+    config_json_path = os.path.join(log_dir, "..", "config.json")
+    with open(config_json_path, "w") as outfile:
         json.dump(config, outfile, indent=4)
+    connect_configuration_file(clearml_task, config_json_path, "robomimic_config_file")
 
     print("\n============= Model Summary =============")
     print(model)  # print model summary
@@ -454,14 +514,16 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
 
         # Save model checkpoints based on conditions (success rate, validation loss, etc)
         if should_save_ckpt:
+            ckpt_path = os.path.join(ckpt_dir, epoch_ckpt_name + ".pth")
             TrainUtils.save_model(
                 model=model,
                 config=config,
                 env_meta=env_meta,
                 shape_meta=shape_meta,
-                ckpt_path=os.path.join(ckpt_dir, epoch_ckpt_name + ".pth"),
+                ckpt_path=ckpt_path,
                 obs_normalization_stats=obs_normalization_stats,
             )
+            upload_checkpoint(clearml_task, ckpt_path)
 
         # Finally, log memory usage in MB
         process = psutil.Process(os.getpid())
@@ -472,12 +534,16 @@ def train(config: Config, device: str, log_dir: str, ckpt_dir: str, video_dir: s
     # terminate logging
     data_logger.close()
 
+    # Upload training videos to ClearML
+    upload_videos_from_dir(clearml_task, video_dir, "training_rollouts")
 
-def main(args: argparse.Namespace):
+
+def main(args: argparse.Namespace, clearml_task=None):
     """Train a model on a task using a specified algorithm.
 
     Args:
         args: Command line arguments.
+        clearml_task: ClearML Task instance (or None if ClearML is disabled/unavailable).
     """
     # load config
     if args.task is not None:
@@ -540,6 +606,8 @@ def main(args: argparse.Namespace):
 
     if args.normalize_training_actions:
         config.train.data = normalize_hdf5_actions(config, log_dir)
+        norm_params_path = os.path.join(log_dir, "normalization_params.txt")
+        connect_configuration_file(clearml_task, norm_params_path, "normalization_params")
 
     # get torch device
     device = TorchUtils.get_torch_device(try_to_use_cuda=config.train.cuda)
@@ -549,48 +617,14 @@ def main(args: argparse.Namespace):
     # catch error during training and print it
     res_str = "finished run successfully!"
     try:
-        train(config, device, log_dir, ckpt_dir, video_dir)
+        train(config, device, log_dir, ckpt_dir, video_dir, clearml_task=clearml_task)
     except Exception as e:
         res_str = f"run failed with error:\n{e}\n\n{traceback.format_exc()}"
     print(res_str)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    # Experiment Name (for tensorboard, saving models, etc.)
-    parser.add_argument(
-        "--name",
-        type=str,
-        default=None,
-        help="(optional) if provided, override the experiment name defined in the config",
-    )
-
-    # Dataset path, to override the one in the config
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default=None,
-        help="(optional) if provided, override the dataset path defined in the config",
-    )
-
-    parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-    parser.add_argument("--algo", type=str, default=None, help="Name of the algorithm.")
-    parser.add_argument("--log_dir", type=str, default="robomimic", help="Path to log directory")
-    parser.add_argument("--normalize_training_actions", action="store_true", default=False, help="Normalize actions")
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=None,
-        help=(
-            "Optional: Number of training epochs. If specified, overrides the number of epochs from the JSON training"
-            " config."
-        ),
-    )
-
-    args = parser.parse_args()
-
     # run training
-    main(args)
+    main(args_cli, clearml_task=clearml_task)
     # close sim app
     simulation_app.close()
