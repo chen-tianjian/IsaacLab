@@ -22,6 +22,14 @@ Args:
 
 import argparse
 
+from clearml_utils import (
+    add_clearml_args,
+    init_clearml_task,
+    maybe_execute_remotely,
+    report_scalar,
+    resolve_checkpoint,
+)
+
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
@@ -42,11 +50,20 @@ parser.add_argument(
 )
 parser.add_argument("--enable_pinocchio", default=False, action="store_true", help="Enable Pinocchio.")
 
+add_clearml_args(parser)
 
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
 args_cli = parser.parse_args()
+
+# --- ClearML init (before AppLauncher) ---
+clearml_task = init_clearml_task(args_cli, task_type="testing", default_task_name=f"play_{args_cli.task}")
+maybe_execute_remotely(clearml_task, args_cli)
+
+# --- Resolve ClearML checkpoint URI (before AppLauncher, no sim needed) ---
+if args_cli.checkpoint is not None:
+    args_cli.checkpoint = resolve_checkpoint(args_cli.checkpoint)
 
 if args_cli.enable_pinocchio:
     # Import pinocchio before AppLauncher to force the use of the version
@@ -208,9 +225,13 @@ def main():
         results.append(terminated)
         print(f"[INFO] Trial {trial}: {terminated}\n")
 
+    success_rate = results.count(True) / len(results)
     print(f"\nSuccessful trials: {results.count(True)}, out of {len(results)} trials")
-    print(f"Success rate: {results.count(True) / len(results)}")
+    print(f"Success rate: {success_rate}")
     print(f"Trial Results: {results}\n")
+
+    # Report success rate to ClearML
+    report_scalar(clearml_task, title="evaluation", series="success_rate", value=success_rate, iteration=0)
 
     env.close()
 
