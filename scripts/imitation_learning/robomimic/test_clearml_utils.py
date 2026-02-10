@@ -124,6 +124,30 @@ class TestGracefulDegradation(unittest.TestCase):
         # Should not raise
         upload_videos_from_dir(None, "/path/to/videos", "title")
 
+    def test_close_clearml_task_noop_when_task_none(self):
+        from clearml_utils import close_clearml_task
+
+        # Should not raise
+        close_clearml_task(None)
+
+
+class TestCloseClearMLTask(unittest.TestCase):
+    """Test close_clearml_task with mocked ClearML."""
+
+    def test_close_calls_task_close(self):
+        from clearml_utils import close_clearml_task
+
+        mock_task = MagicMock()
+        close_clearml_task(mock_task)
+
+        mock_task.close.assert_called_once()
+
+    def test_noop_when_task_none(self):
+        from clearml_utils import close_clearml_task
+
+        # Should not raise
+        close_clearml_task(None)
+
 
 class TestAddClearMLArgs(unittest.TestCase):
     """Test that add_clearml_args adds all expected arguments."""

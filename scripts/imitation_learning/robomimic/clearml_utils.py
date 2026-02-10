@@ -160,6 +160,21 @@ def maybe_execute_remotely(task, args):
     task.execute_remotely(queue_name=queue_name, exit_process=True)
 
 
+def close_clearml_task(task):
+    """Explicitly close and finalize a ClearML Task.
+
+    Must be called BEFORE simulation_app.close() because Isaac Sim's shutdown
+    may leave background threads that prevent Python's atexit handlers from
+    completing, which ClearML relies on to mark tasks as "completed".
+
+    Args:
+        task: ClearML Task instance (or None for no-op).
+    """
+    if task is None:
+        return
+    task.close()
+
+
 # ---------------------------------------------------------------------------
 # URI helpers
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ import argparse
 
 from clearml_utils import (
     add_clearml_args,
+    close_clearml_task,
     connect_configuration_file,
     init_clearml_task,
     maybe_execute_remotely,
@@ -375,5 +376,7 @@ def main() -> None:
 if __name__ == "__main__":
     # run the main function
     main()
+    # close ClearML task before Isaac Sim shutdown to ensure proper finalization
+    close_clearml_task(clearml_task)
     # close sim app
     simulation_app.close()
